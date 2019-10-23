@@ -1,0 +1,16 @@
+---
+applications:
+- name: ipour-wallet-service
+  memory: 192M
+  disk_quota: 256M
+  instances: 1
+  command: npm start
+  buildpacks:
+    - https://github.com/cloudfoundry/nodejs-buildpack
+  health-check-type: process
+  services:
+    - iPourDB
+  env:
+    TOKEN_ADDRESS: 0x8F96aD7151238d27A6afc167A0FF7F2C068E4a66
+    WITHDRAWAL_FEE_IN_TOKENS: 0.01
+  
