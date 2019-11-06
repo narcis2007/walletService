@@ -8,15 +8,14 @@ const Web3 = require('web3');
 const AES = require('aes-cbc');
 
 var ivBase64 = 'AcynMwikMkW4c7+mHtwtfw==';
-var keyBase64 = "OWxkdDc0SGJwWUhFa2VQTm0wcThReFNJeGRuZkpXaU8="; //TODO: get the key from env
+var keyBase64 = process.env.KEY;
 
-const web3 = new Web3(new Web3.providers.HttpProvider('https://rinkeby.infura.io/v3/3d1dacbcaeb34ea889ae105c15220e08'));
+const web3 = new Web3(new Web3.providers.HttpProvider(process.env.WEB3_PROVIDER));
 const sequelize = Models.sequelize;
 
 Models.syncDB(false);
 
 const app = express();
-const port = 3000;
 
 app.use(bodyParser.urlencoded({
     extended: true
@@ -34,42 +33,61 @@ const Transfer = Models.Transfer;
 const Withdrawal = Models.Withdrawal;
 
 
-var systemUserEthereumAccount;//TODO make it an eth account
-
-var chainId = '0x4';//TODO: get it from env
+var systemUserEthereumAccount;
 var tokenContract = new web3.eth.Contract(require('./ERC20ABI.json'), process.env.TOKEN_ADDRESS);
 
+function transfer(senderId, receiverId, amount, feePercentage, res){
+    sequelize.transaction(async function (t) {
+        var fromUser = await User.findByPk(senderId, {transaction: t});
+        var feeCollectorUser = await User.findByPk(Models.Constants.FEE_COLLECTOR_USER_ID, {transaction: t}); // TODO: handle fee and test!!
+        var receiverUser = await User.findByPk(receiverId, {transaction: t});
 
-app.post('/transfer', app.oauth.authenticate({scope:'TRANSFER'}), async (req, res) => // TODO: handle security
-{
-    // oare merita sa fac unul dedicat pentru a transfera de la sys acc la un alt user cand primim bani in banca? -> trebuie sa vad cum facem cu securitatea
-
-    var fromUser = await User.findByPk(req.body.senderId);
-    var receiverUser = await User.findByPk(req.body.receiverId);
-    if (fromUser.balance < req.body.amount) {
-        res.send('error: not enough balance!')
-    } else {
-        sequelize.transaction(async function (t) {
-            fromUser.balance -= req.body.amount;
-            await fromUser.save();
-            receiverUser.balance += req.body.amount;
-            await receiverUser.save();
+        var fee = 0;
+        fee += (amount * feePercentage) / 100; //TODO: expose api for get fee for amount paid
+        if (fromUser.balance < amount + fee) {
+            res.send( 'error: not enough balance!');
+        } else {
+            fromUser.balance -= amount + fee;
+            await fromUser.save({transaction: t});
+            receiverUser.balance += amount;
+            await receiverUser.save({transaction: t});
             await Transfer.build({
-                amount: req.body.amount,
-                receiverId: req.body.receiverId,
-                senderId: req.body.senderId
-            }).save();
+                amount: amount,
+                receiverId: receiverId,
+                senderId: senderId
+            }).save({transaction: t});
+
+            if(fee !=0){
+                feeCollectorUser.balance += fee;
+                await feeCollectorUser.save({transaction: t});
+                await Transfer.build({
+                    amount: fee,
+                    receiverId: feeCollectorUser.userId,
+                    senderId: senderId
+                }).save({transaction: t});
+            }
+
             var response = {status: 'ok'};
             res.send(JSON.stringify(response));
-        });
-    }//TODO: add transfer event
+        }
+    });
+}
+
+app.post('/issueTokens', app.oauth.authenticate(), async (req, res) =>//{scope:'TRANSFER'}
+{
+    transfer(Models.Constants.SYSTEM_USER_ID, req.body.receiverId, req.body.amount, 0, res);
+});
+
+app.post('/pay', app.oauth.authenticate(), async (req, res) => // {scope:'TRANSFER'} // TODO create a shared function between this and transfer
+{
+    transfer(req.body.senderId, req.body.receiverId, req.body.amount, process.env.PAYMENT_FEE_PERCENTAGE, res);
 
 });
 
-app.post('/initializeDepositAddress', app.oauth.authenticate({scope:'INITIALIZE_DEPOSIT_ADDRESS'}), async (req, res) => // TODO: handle security
+app.post('/initializeDepositAddress', app.oauth.authenticate(), async (req, res) => // {scope:'INITIALIZE_DEPOSIT_ADDRESS'}
     {
         var user = await User.findByPk(req.body.userId);
-        if(user.depositAddress == null && user.depositPrivateKey == null){
+        if (user.depositAddress == null && user.depositPrivateKey == null) {
             var ethereumAccount = web3.eth.accounts.create();
             user.depositAddress = ethereumAccount.address;
             user.depositPrivateKey = AES.encrypt(ethereumAccount.privateKey, keyBase64, ivBase64);
@@ -85,7 +103,7 @@ app.post('/initializeDepositAddress', app.oauth.authenticate({scope:'INITIALIZE_
     }
 );
 
-app.post('/withdraw', app.oauth.authenticate({scope:'WITHDRAW'}), async (req, res) => // TODO: handle security & use logger
+app.post('/withdraw', app.oauth.authenticate(), async (req, res) => // TODO: use logger {scope:'WITHDRAW'}
         // TODO: do it all in a single transaction for safety
     {
         console.log(req.body);
@@ -102,7 +120,7 @@ app.post('/withdraw', app.oauth.authenticate({scope:'WITHDRAW'}), async (req, re
 
                 const txParams = {
                     gasLimit: web3.utils.toHex(51595),
-                    chainId: chainId,
+                    chainId: process.env.CHAIN_ID,
                     to: process.env.TOKEN_ADDRESS,
                     gasPrice: web3.utils.toHex(await web3.eth.getGasPrice()),
                     nonce: web3.utils.toHex(nonce),
@@ -146,18 +164,17 @@ app.post('/withdraw', app.oauth.authenticate({scope:'WITHDRAW'}), async (req, re
 // Get token.
 app.post('/oauth/token', app.oauth.token());
 
-app.get('/', (req, res) =>
-    {
+app.get('/', (req, res) => {
         res.send('Wallet Service Works!');
 
     }
 );
 
-async function run (){
+async function run() {
 
     var systemUser = await User.findByPk(Models.Constants.SYSTEM_USER_ID);
 
-    var systemUserPrivateKey = AES.decrypt(systemUser.depositPrivateKey, keyBase64,ivBase64);
+    var systemUserPrivateKey = AES.decrypt(systemUser.depositPrivateKey, keyBase64, ivBase64);
 
     systemUserEthereumAccount = web3.eth.accounts.privateKeyToAccount(systemUserPrivateKey);
 

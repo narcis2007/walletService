@@ -6,7 +6,7 @@
     "start": "node app.js"
   },
   "dependencies": {
-    "@narcis2007/ipour-models": "^1.0.22",
+    "@narcis2007/ipour-models": "^1.0.27",
     "aes-cbc": "^1.0.1",
     "debug": "~2.6.9",
     "express": "~4.16.1",

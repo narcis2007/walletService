@@ -61,8 +61,8 @@ module.exports.getClient = function* (clientId, clientSecret) {
 
 module.exports.saveToken = function* (token, client, user) {
     var oauthToken = Token.build(token);
-    oauthToken.setClient(client.clientId);
     return oauthToken.save().then(function (result) {
+        oauthToken.setClient(client.clientId);
         return {
             accessToken: token.accessToken,
             accessTokenExpiresAt: token.accessTokenExpiresAt,
