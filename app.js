@@ -34,7 +34,12 @@ const Withdrawal = Models.Withdrawal;
 
 
 var systemUserEthereumAccount;
-var tokenContract = new web3.eth.Contract(require('./ERC20ABI.json'), process.env.TOKEN_ADDRESS);
+const tokenAddress = process.env.TOKEN_ADDRESS;
+const tokenContract = new web3.eth.Contract(require('./ERC20ABI.json'), tokenAddress);
+
+const withdrawalFeeInTokens = process.env.WITHDRAWAL_FEE_IN_TOKENS;
+const paymentFeePercentage = process.env.PAYMENT_FEE_PERCENTAGE;
+const chainId = process.env.CHAIN_ID;
 
 function transfer(senderId, receiverId, amount, feePercentage, res){
     sequelize.transaction(async function (t) {
@@ -80,7 +85,7 @@ app.post('/issueTokens', app.oauth.authenticate(), async (req, res) =>//{scope:'
 
 app.post('/pay', app.oauth.authenticate(), async (req, res) => // {scope:'TRANSFER'} // TODO create a shared function between this and transfer
 {
-    transfer(req.body.senderId, req.body.receiverId, req.body.amount, process.env.PAYMENT_FEE_PERCENTAGE, res);
+    transfer(req.body.senderId, req.body.receiverId, req.body.amount, paymentFeePercentage, res);
 
 });
 
@@ -107,36 +112,37 @@ app.post('/withdraw', app.oauth.authenticate(), async (req, res) => // TODO: use
         // TODO: do it all in a single transaction for safety
     {
         console.log(req.body);
-        if (req.body.amount <= process.env.WITHDRAWAL_FEE_IN_TOKENS) {
-            res.send(JSON.stringify({error: `amount must be higher than the fee ${process.env.WITHDRAWAL_FEE_IN_TOKENS}`}))
+
+        if (req.body.amount <= withdrawalFeeInTokens) {
+            res.send(JSON.stringify({error: `amount must be higher than the fee ${withdrawalFeeInTokens}`}))
         }
         var user = await User.findByPk(req.body.senderId);
         // console.log(user);
         if (user != null) {
             if (req.body.amount <= user.balance) {
-                let amountWithDecimalsAfterFee = (req.body.amount - process.env.WITHDRAWAL_FEE_IN_TOKENS).toFixed(8) * (10 ** 8);
+                let amountWithDecimalsAfterFee = (req.body.amount - withdrawalFeeInTokens).toFixed(8) * (10 ** 8);
 
                 let nonce = await web3.eth.getTransactionCount(systemUserEthereumAccount.address);
 
                 const txParams = {
                     gasLimit: web3.utils.toHex(51595),
-                    chainId: process.env.CHAIN_ID,
-                    to: process.env.TOKEN_ADDRESS,
+                    chainId: chainId,
+                    to: tokenAddress, //TODO: extract these in global variables instead of retrieving all over the place
                     gasPrice: web3.utils.toHex(await web3.eth.getGasPrice()),
                     nonce: web3.utils.toHex(nonce),
                     value: '0x00',
                     data: tokenContract.methods.transfer(req.body.address, amountWithDecimalsAfterFee).encodeABI()
                 };
-                var signedTransaction = await systemUserEthereumAccount.signTransaction(txParams); //TODO: better use web3.eth.accounts.signTransaction
+                var signedTransaction = await systemUserEthereumAccount.signTransaction(txParams);
                 web3.eth.sendSignedTransaction(signedTransaction.rawTransaction).once('transactionHash', async function (hash) {
                     console.log('tx_hash:' + hash)
                     user.balance = parseFloat(user.balance) - req.body.amount;
                     user.save();
                     var feeCollectorUser = await User.findByPk(Models.Constants.FEE_COLLECTOR_USER_ID);
-                    feeCollectorUser.balance = feeCollectorUser.balance + parseFloat(process.env.WITHDRAWAL_FEE_IN_TOKENS); // TODO: do this in a single transaction
+                    feeCollectorUser.balance = feeCollectorUser.balance + parseFloat(withdrawalFeeInTokens); // TODO: do this in a transaction
                     feeCollectorUser.save();
                     await Transfer.build({
-                        amount: process.env.WITHDRAWAL_FEE_IN_TOKENS,
+                        amount: withdrawalFeeInTokens,
                         receiverId: feeCollectorUser.userId,
                         senderId: req.body.senderId
                     }).save();
