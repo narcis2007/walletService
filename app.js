@@ -80,17 +80,20 @@ function transfer(senderId, receiverId, amount, feePercentage, res){
 
 app.post('/issueTokens', app.oauth.authenticate(), async (req, res) =>//{scope:'TRANSFER'}
 {
+    console.log('/issueTokens');
     transfer(Models.Constants.SYSTEM_USER_ID, req.body.receiverId, req.body.amount, 0, res);
 });
 
 app.post('/pay', app.oauth.authenticate(), async (req, res) => // {scope:'TRANSFER'} // TODO create a shared function between this and transfer
 {
+    console.log('/pay');
     transfer(req.body.senderId, req.body.receiverId, req.body.amount, paymentFeePercentage, res);
 
 });
 
 app.post('/initializeDepositAddress', app.oauth.authenticate(), async (req, res) => // {scope:'INITIALIZE_DEPOSIT_ADDRESS'}
     {
+        console.log('/initializeDepositAddress');
         var user = await User.findByPk(req.body.userId);
         if (user.depositAddress == null && user.depositPrivateKey == null) {
             var ethereumAccount = web3.eth.accounts.create();
@@ -111,7 +114,7 @@ app.post('/initializeDepositAddress', app.oauth.authenticate(), async (req, res)
 app.post('/withdraw', app.oauth.authenticate(), async (req, res) => // TODO: use logger {scope:'WITHDRAW'}
         // TODO: do it all in a single transaction for safety
     {
-        console.log(req.body);
+        console.log('/withdraw');
 
         if (req.body.amount <= withdrawalFeeInTokens) {
             res.send(JSON.stringify({error: `amount must be higher than the fee ${withdrawalFeeInTokens}`}))
