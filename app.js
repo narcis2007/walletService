@@ -41,11 +41,11 @@ const withdrawalFeeInTokens = process.env.WITHDRAWAL_FEE_IN_TOKENS;
 const paymentFeePercentage = process.env.PAYMENT_FEE_PERCENTAGE;
 const chainId = process.env.CHAIN_ID;
 
-function transfer(senderId, receiverId, amount, feePercentage, res){
-    sequelize.transaction(async function (t) {
-        var fromUser = await User.findByPk(senderId, {transaction: t});
-        var feeCollectorUser = await User.findByPk(Models.Constants.FEE_COLLECTOR_USER_ID, {transaction: t}); // TODO: handle fee and test!!
-        var receiverUser = await User.findByPk(receiverId, {transaction: t});
+async function transfer(senderId, receiverId, amount, feePercentage, res){
+    // sequelize.transaction(async function (t) {
+        var fromUser = await User.findByPk(senderId);//, {transaction: t}
+        var feeCollectorUser = await User.findByPk(Models.Constants.FEE_COLLECTOR_USER_ID); //, {transaction: t} TODO: handle fee and test!!
+        var receiverUser = await User.findByPk(receiverId);//, {transaction: t}
 
         var fee = 0;
         fee += (amount * feePercentage) / 100; //TODO: expose api for get fee for amount paid
@@ -53,41 +53,41 @@ function transfer(senderId, receiverId, amount, feePercentage, res){
             res.send( 'error: not enough balance!');
         } else {
             fromUser.balance -= amount + fee;
-            await fromUser.save({transaction: t});
+            await fromUser.save();//{transaction: t}
             receiverUser.balance += amount;
-            await receiverUser.save({transaction: t});
+            await receiverUser.save();//{transaction: t}
             await Transfer.build({
                 amount: amount,
                 receiverId: receiverId,
                 senderId: senderId
-            }).save({transaction: t});
+            }).save();//{transaction: t}
 
             if(fee !=0){
                 feeCollectorUser.balance += fee;
-                await feeCollectorUser.save({transaction: t});
+                await feeCollectorUser.save();//{transaction: t}
                 await Transfer.build({
                     amount: fee,
                     receiverId: feeCollectorUser.userId,
                     senderId: senderId
-                }).save({transaction: t});
+                }).save();//{transaction: t}
             }
 
             var response = {status: 'ok'};
             res.send(JSON.stringify(response));
         }
-    });
+    // });
 }
 
 app.post('/issueTokens', app.oauth.authenticate(), async (req, res) =>//{scope:'TRANSFER'}
 {
     console.log('/issueTokens');
-    transfer(Models.Constants.SYSTEM_USER_ID, req.body.receiverId, req.body.amount, 0, res);
+    await transfer(Models.Constants.SYSTEM_USER_ID, req.body.receiverId, req.body.amount, 0, res);
 });
 
 app.post('/pay', app.oauth.authenticate(), async (req, res) => // {scope:'TRANSFER'} // TODO create a shared function between this and transfer
 {
     console.log('/pay');
-    transfer(req.body.senderId, req.body.receiverId, req.body.amount, paymentFeePercentage, res);
+    await transfer(req.body.senderId, req.body.receiverId, req.body.amount, paymentFeePercentage, res);
 
 });
 
